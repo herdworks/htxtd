@@ -7,6 +7,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.1.1 (2026-8-13)
+
 * Added version.go with `LibVersion` and `LibReleaseDate` package variables.
 
 ## v0.1.0 (2026-08-13)
