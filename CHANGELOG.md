@@ -7,6 +7,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.2.0 (2026-08-20)
+
 * Changed `Server.Serve` to close server-owned SSE clients and join its HTTP
   serve goroutine on cancellation or listener failure. Graceful shutdown has a
   five-second deadline; forced shutdowns now return an error rather than
