@@ -35,6 +35,7 @@ type reloadHub struct {
 type reloadClient struct {
 	reloads chan struct{}
 	done    chan struct{}
+	closed  bool
 }
 
 const (
@@ -108,17 +109,25 @@ func (server *Server) Serve(ctx context.Context, listener net.Listener) error {
 		errors <- httpServer.Serve(listener)
 	}()
 	select {
-	case err := <-errors:
-		if err == http.ErrServerClosed {
+	case serveErr := <-errors:
+		if serveErr == http.ErrServerClosed {
 			return nil
 		}
-		return err
+		if shutdownErr := server.shutdownHTTP(httpServer); shutdownErr != nil {
+			return fmt.Errorf("%w after serve failure: %v", shutdownErr, serveErr)
+		}
+		return serveErr
 	case <-ctx.Done():
-		server.closeReloadClients()
-		shutdownContext, cancel := context.WithTimeout(context.Background(), defaultShutdownTimeout)
-		defer cancel()
-		if err := httpServer.Shutdown(shutdownContext); err != nil {
-			_ = httpServer.Close()
+		shutdownErr := server.shutdownHTTP(httpServer)
+		serveErr := <-errors
+		if shutdownErr != nil {
+			if serveErr != nil && serveErr != http.ErrServerClosed {
+				return fmt.Errorf("%w: %v", shutdownErr, serveErr)
+			}
+			return shutdownErr
+		}
+		if serveErr != nil && serveErr != http.ErrServerClosed {
+			return serveErr
 		}
 		return nil
 	}
@@ -187,9 +196,22 @@ func (server *Server) closeReloadClients() {
 	server.reload.mu.Lock()
 	defer server.reload.mu.Unlock()
 	for client := range server.reload.clients {
-		close(client.done)
-		delete(server.reload.clients, client)
+		if !client.closed {
+			close(client.done)
+			client.closed = true
+		}
 	}
+}
+
+func (server *Server) shutdownHTTP(httpServer *http.Server) error {
+	server.closeReloadClients()
+	shutdownContext, cancel := context.WithTimeout(context.Background(), defaultShutdownTimeout)
+	defer cancel()
+	if err := httpServer.Shutdown(shutdownContext); err != nil {
+		_ = httpServer.Close()
+		return fmt.Errorf("forced HTTP shutdown: %w", err)
+	}
+	return nil
 }
 
 func (server *Server) logRequests(handler http.Handler) http.Handler {

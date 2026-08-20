@@ -172,6 +172,61 @@ func TestServerServeDeliversReloadAndShutsDownSSEClients(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Serve() did not shut down with an open SSE client")
 	}
+	assertReloadClientsDrained(t, &server)
+	reused, err := net.Listen("tcp", address)
+	if err != nil {
+		t.Fatalf("listener was not released: %v", err)
+	}
+	if err := reused.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestServerServeClosesSSEClientsAfterListenerFailure(t *testing.T) {
+	listener := reserveListener(t)
+	server := Server{
+		Directory:  t.TempDir(),
+		Bind:       "127.0.0.1",
+		Port:       listenerPort(t, listener),
+		LiveReload: true,
+		LogWriter:  io.Discard,
+	}
+	errors := make(chan error, 1)
+	go func() { errors <- server.Serve(context.Background(), listener) }()
+	response, err := http.Get("http://" + listener.Addr().String() + "/.htxtd/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-errors; err == nil {
+		t.Fatal("Serve() error = nil, want listener failure")
+	}
+	assertReloadClientsDrained(t, &server)
+	clientErrors := make(chan error, 1)
+	go func() {
+		_, err := bufio.NewReader(response.Body).ReadString('\n')
+		clientErrors <- err
+	}()
+	select {
+	case err := <-clientErrors:
+		if err == nil {
+			t.Fatal("SSE client remained open after listener failure")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SSE client did not close after listener failure")
+	}
+}
+
+func assertReloadClientsDrained(t *testing.T, server *Server) {
+	t.Helper()
+	server.reload.mu.Lock()
+	defer server.reload.mu.Unlock()
+	if count := len(server.reload.clients); count != 0 {
+		t.Fatalf("reload clients = %d, want 0", count)
+	}
 }
 
 func reserveListener(t *testing.T) net.Listener {

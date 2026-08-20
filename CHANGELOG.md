@@ -7,6 +7,11 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+* Changed `Server.Serve` to close server-owned SSE clients and join its HTTP
+  serve goroutine on cancellation or listener failure. Graceful shutdown has a
+  five-second deadline; forced shutdowns now return an error rather than
+  reporting successful cancellation.
+
 ## v0.1.1 (2026-8-13)
 
 * Added version.go with `LibVersion` and `LibReleaseDate` package variables.
